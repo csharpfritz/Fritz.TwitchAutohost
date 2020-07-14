@@ -1,0 +1,24 @@
+{
+    "data": [
+        {
+            "game_id": "509670",
+            "id": "2193172657",
+            "language": "en",
+            "started_at": "2020-07-14T13:01:03Z",
+            "tag_ids": [
+                "6ea6bca4-4712-4ab9-a906-e3336a9d8039",
+                "6f86127d-6051-4a38-94bb-f7b475dde109",
+                "cea7bc0c-75a5-4446-8743-6db031b71550",
+                "c23ce252-cf78-4b98-8c11-8769801aaf3a",
+                "a59f1e4e-257b-4bd0-90c7-189c3efbf917",
+                "67259b26-ff83-444e-9d3c-faab390df16f"
+            ],
+            "thumbnail_url": "https://static-cdn.jtvnw.net/previews-ttv/live_user_csharpfritz-{width}x{height}.jpg",
+            "title": "Building a better autohost with Azure Functions, C#, filters, and !coffee",
+            "type": "live",
+            "user_id": "96909659",
+            "user_name": "csharpfritz",
+            "viewer_count": 124
+        }
+    ]
+}
