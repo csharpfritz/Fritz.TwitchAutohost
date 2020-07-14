@@ -9,6 +9,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -20,14 +21,15 @@ namespace Fritz.TwitchAutohost
 	{
 
 		private const string STORAGE_CONNECTIONSTRING_NAME = "TwitchAutohostStorage";
+		private readonly CurrentSubscriptionsRepository _Repository;
 
-		public WebHookManagement(IConfiguration configuration, IHttpClientFactory httpClientFactory) : base(configuration, httpClientFactory)
+		public WebHookManagement(IConfiguration configuration, IHttpClientFactory httpClientFactory, CurrentSubscriptionsRepository repository) : base(configuration, httpClientFactory)
 		{
+			_Repository = repository;
 		}
 
 		[FunctionName("Subscribe")]
-		[return: Table("CurrentWebhookSubscriptions", Connection = STORAGE_CONNECTIONSTRING_NAME)]
-		public async Task<CurrentSubscription> Subscribe([QueueTrigger("twitch-webhook-subscription", Connection = STORAGE_CONNECTIONSTRING_NAME)] string msg,
+		public async Task Subscribe([QueueTrigger("twitch-webhook-subscription", Connection = STORAGE_CONNECTIONSTRING_NAME)] string msg,
 																				ILogger logger)
 		{
 
@@ -58,26 +60,26 @@ namespace Fritz.TwitchAutohost
 				{
 
 					// Use the Table output binding to save a new record to Azure table storage
-					return new CurrentSubscription
+					var newSub = new CurrentSubscription
 					{
 						ChannelId = channelId,
 						ChannelName = msg,
 						ExpirationDateTimeUtc = DateTime.UtcNow.AddSeconds(leaseInSeconds).AddDays(-1)
 					};
+					await _Repository.AddSubscription(newSub);
 
 				}
 
 				// Error: Log information about the error and gracefully fail
 				var responseBody = await responseMessage.Content.ReadAsStringAsync();
 				logger.Log(LogLevel.Error, $"Error response body: {responseBody}");
-				return null;
 
 			}
 
 		}
 
-		[FunctionName("ReceiveEndOfStream")]
-		public HttpResponseMessage EndOfStream(
+		[FunctionName("ReceiveStreamUpdate")]
+		public async Task<HttpResponseMessage> ReceiveStreamUpdate(
 			[HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req,
 							ILogger log)
 						//	,[ServiceBus("EndOfStream", Connection = "ServiceBusConnectionString", EntityType = EntityType.Topic)]
@@ -89,16 +91,9 @@ namespace Fritz.TwitchAutohost
 			log.LogInformation($"ChannelId: {channelId}");
 
 			// Handle the verification on the WebHook subscription
-			var challenge = req.Query["hub.challenge"].ToString();
-			if (!string.IsNullOrEmpty(challenge))
-			{
-
-				log.LogInformation($"Successfully subscribed to channel {channelId}");
-
-				return new HttpResponseMessage(HttpStatusCode.OK)
-				{
-					Content = new StringContent(challenge)
-				};
+			var challengeContent = VerifySubscription(req, log);
+			if (challengeContent != null) {
+				return challengeContent;
 			}
 
 			if (!string.IsNullOrEmpty(req.Query["userid"].ToString())) channelId = GetChannelIdForUserName(req.Query["userid"].ToString()).GetAwaiter().GetResult();
@@ -113,14 +108,40 @@ namespace Fritz.TwitchAutohost
 				log.LogTrace($"Valid signature for ChannelId {channelId}");
 			}
 
-			//var videoId = GetLastVideoForChannel(channelId).GetAwaiter().GetResult();
-			//log.LogInformation($"Found last video with id: {videoId}");
-
-			//completedStream.ChannelName = base.GetUserNameForChannelId(channelId).GetAwaiter().GetResult();
-			//completedStream.ChannelId = channelId;
-			//completedStream.VideoId = videoId;
+			await HandlePayload(req, log, channelId);
 
 			return new HttpResponseMessage(HttpStatusCode.OK);
+
+		}
+
+		private async Task HandlePayload(HttpRequest req, ILogger log, string channelId)
+		{
+
+			var msg = await (new StreamReader(req.Body).ReadToEndAsync());
+			var payload = JsonConvert.DeserializeObject<TwitchStreamChangeMessage>(msg);
+
+			if (payload.data.Length == 0) // end of stream
+			{
+			 // TODO: delete active record for this channel
+			} else {
+				// TODO: Add / update active record for this channel
+			}
+
+		}
+
+		private HttpResponseMessage VerifySubscription(HttpRequest req, ILogger log)
+		{
+
+			var challenge = req.Query["hub.challenge"].ToString();
+			if (string.IsNullOrEmpty(challenge)) return null;
+
+			var channelId = req.Query["channelId"].ToString();
+			log.LogInformation($"Successfully subscribed to channel {channelId}");
+
+			return new HttpResponseMessage(HttpStatusCode.OK)
+			{
+				Content = new StringContent(challenge)
+			};
 
 		}
 	}
