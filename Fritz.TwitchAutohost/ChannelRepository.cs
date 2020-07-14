@@ -11,6 +11,7 @@ namespace Fritz.TwitchAutohost
 			"csharpfritz",
 			"microsoftdeveloper",
 			"baldbeardedbuilder",
+			"luckynos7evin",
 			"1kevgriff",
 			"coderushed"
 		};

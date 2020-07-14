@@ -41,15 +41,16 @@ namespace Fritz.TwitchAutohost
 			{ HostingState.Hosting, ConsiderHostingChange }
 		};
 
-		[FunctionName(nameof(MonitorCurrentState))]
-		public static async Task MonitorCurrentState([TimerTrigger("* * * * *")] TimerInfo myTimer)
-		{
+		//[FunctionName(nameof(MonitorCurrentState))]
+		//public static async Task MonitorCurrentState([TimerTrigger("* * * * *")] TimerInfo myTimer)
+		//{
 
-			var hostingState = IdentifyHostingState(TwitchAuthTokens.Instance.UserName);
+		//	var hostingState = IdentifyHostingState(TwitchAuthTokens.Instance.UserName);
 
+		//	return;
 			
 
-		}
+		//}
 
 		private static HostingState IdentifyHostingState(string channelName)
 		{
@@ -59,7 +60,7 @@ namespace Fritz.TwitchAutohost
 			// TODO: Convert ChannelName to user_id
 
 			// TODO: Get hosting for MULTIPLE channels GET https://api.twitch.tv/helix/streams
-
+			return HostingState.Nothing;
 
 		}
 
