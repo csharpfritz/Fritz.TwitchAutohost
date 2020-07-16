@@ -7,32 +7,22 @@ using System.Threading.Tasks;
 
 namespace Fritz.TwitchAutohost.Data
 {
-  public class CurrentSubscriptionsRepository
+  public class CurrentSubscriptionsRepository : BaseTableRepository<CurrentSubscription>
   {
-		private const string SUBSCRIPTIONS_TABLENAME = "CurrentWebhookSubscriptions";
-		private IConfiguration _Configuration;
 
-    public CurrentSubscriptionsRepository(IConfiguration configuration)
+
+		public CurrentSubscriptionsRepository(IConfiguration configuration) : base(configuration)
     {
-
-      _Configuration = configuration;
 
     }
 
-    private CloudTable GetCloudTable(string tableName)
-    {
+		protected override string TableName => "CurrentWebhookSubscriptions";
 
-      var account = CloudStorageAccount.Parse(_Configuration["TwitchChatStorage"]);
-      var client = account.CreateCloudTableClient(new TableClientConfiguration());
-      return client.GetTableReference(tableName);
-
-
-    }
 
     public async Task<IEnumerable<CurrentSubscription>> GetExpiringSubscriptions()
     {
 
-      var table = GetCloudTable(SUBSCRIPTIONS_TABLENAME);
+      var table = GetCloudTable(TableName);
 
       var partitionKey = DateTime.UtcNow.ToString("yyyyMMdd");
       var query = new TableQuery<CurrentSubscription>
@@ -63,25 +53,6 @@ namespace Fritz.TwitchAutohost.Data
       return outList;
 
     }
-
-    public Task AddSubscription(CurrentSubscription sub)
-    {
-
-      var table = GetCloudTable(SUBSCRIPTIONS_TABLENAME);
-
-      return table.ExecuteAsync(TableOperation.InsertOrReplace(sub));
-
-    }
-
-    public Task RemoveSubscription(CurrentSubscription sub)
-    {
-
-      var table = GetCloudTable(SUBSCRIPTIONS_TABLENAME);
-
-      return table.ExecuteAsync(TableOperation.Delete(sub));
-
-    }
-
 
 
   }
