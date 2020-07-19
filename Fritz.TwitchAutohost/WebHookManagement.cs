@@ -1,5 +1,6 @@
 ﻿using Fritz.TwitchAutohost.Data;
 using Fritz.TwitchAutohost.Messages;
+using Fritz.TwitchAutohost.Messages.Kraken;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
@@ -10,6 +11,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -121,7 +123,7 @@ namespace Fritz.TwitchAutohost
 		public async Task<HttpResponseMessage> Test([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req) {
 
 			return new HttpResponseMessage(HttpStatusCode.OK) {
-				Content = new StringContent(await ConvertFromTwitchCategoryId("33214"))
+				Content = new StringContent((await GetMatureFlag("32402099")).ToString())
 			};
 
 		}
@@ -150,10 +152,10 @@ namespace Fritz.TwitchAutohost
 			{
 				Category = await ConvertFromTwitchCategoryId(twitchStream.game_id), // TODO: Lookup and convert from Twitch's lookup table
 				ChannelId = twitchStream.user_id,
-				Tags = ConvertFromTwitchTagIds(twitchStream.tag_ids),
+				Tags = await ConvertFromTwitchTagIds(twitchStream.tag_ids),
 				UserName = twitchStream.user_name
 			};
-			ac.Mature = GetMatureFlag(twitchStream.user_id);
+			ac.Mature = await GetMatureFlag(twitchStream.user_id);
 
 			return new ActiveChannel();
 		}
@@ -169,17 +171,25 @@ namespace Fritz.TwitchAutohost
 
 		}
 
-		private bool GetMatureFlag(string user_id)
+		private async Task<bool> GetMatureFlag(string user_id)
 		{
 			// FETCH mature flag from https://api.twitch.tv/kraken/streams/<channel ID>
-			return true;
+			var client = GetHttpClient("https://api.twitch.tv/kraken/streams/", authHeader: true);
+			var result = await client.GetStringAsync(user_id);
+
+			return JsonConvert.DeserializeObject<TwitchGetStream>(result).stream.channel.mature;
 		}
 
-		private string[] ConvertFromTwitchTagIds(string[] tag_ids)
+		private async Task<string[]> ConvertFromTwitchTagIds(string[] tag_ids)
 		{
 
 			// TODO: Convert with a query using this syntax:  https://dev.twitch.tv/docs/api/reference#get-all-stream-tags
-			throw new NotImplementedException();
+			var client = GetHttpClient("https://api.twitch.tv/helix/tags/streams", authHeader: true);
+			var result = await client.GetStringAsync($"?tag_id={string.Join('&', tag_ids)}");
+
+			var tagPayload = JsonConvert.DeserializeObject<TwitchGetTagsPayload>(result);
+
+			return tagPayload.data.Select(d => d.localization_names.EN_US).ToArray();
 
 		}
 
