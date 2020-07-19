@@ -21,6 +21,9 @@ namespace Fritz.TwitchAutohost.Data
 
 		public string UserName { get; set; }
 
+		/// <summary>
+		/// Is this broadcast intended for Mature audiences only?
+		/// </summary>
 		public bool Mature { get; set; }
 
 		public string Category { get; set; }

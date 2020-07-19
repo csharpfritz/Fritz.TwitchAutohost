@@ -16,6 +16,9 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
+using TwitchLib.Client;
+using TwitchLib.Client.Extensions;
+using TwitchLib.Client.Models;
 
 namespace Fritz.TwitchAutohost
 {
@@ -24,11 +27,12 @@ namespace Fritz.TwitchAutohost
 
 		private const string STORAGE_CONNECTIONSTRING_NAME = "TwitchAutohostStorage";
 		private readonly CurrentSubscriptionsRepository _Repository;
+		private readonly string _MyChannelId;
 
 		public WebHookManagement(IConfiguration configuration, IHttpClientFactory httpClientFactory, CurrentSubscriptionsRepository repository) : base(configuration, httpClientFactory)
 		{
 			_Repository = repository;
-
+			_MyChannelId = configuration["ChannelId"];
 
 		}
 
@@ -122,8 +126,10 @@ namespace Fritz.TwitchAutohost
 		[FunctionName("Test")]
 		public async Task<HttpResponseMessage> Test([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req) {
 
+			await HostTheNextStream(_MyChannelId);
+
 			return new HttpResponseMessage(HttpStatusCode.OK) {
-				Content = new StringContent((await GetMatureFlag("32402099")).ToString())
+				Content = new StringContent("Now hosting...")
 			};
 
 		}
@@ -138,9 +144,37 @@ namespace Fritz.TwitchAutohost
 			if (payload.data.Length == 0) // end of stream
 			{
 				await repo.RemoveByChannelId(channelId);
+				await HostTheNextStream(channelId);
 			} else {
 				await repo.AddOrUpdate(await ConvertFromPayload(payload));
 			}
+
+		}
+
+		private async Task HostTheNextStream(string channelId)
+		{
+
+			var repo = new CurrentHostConfigurationRepository(Configuration);
+			var channelWeAreCurrentlyHosting = (await repo.GetAllForPartition(_MyChannelId)).FirstOrDefault();
+
+			if (channelId == _MyChannelId || channelId == channelWeAreCurrentlyHosting.HostedChannelId) {
+				var channels = await new ActiveChannelRepository(Configuration).GetAllActiveChannels();
+				var nextChannel = new AutohostFilter(Configuration).DecideOnChannelToHost(channels);
+				if (nextChannel == null) return;
+				
+				// HOST THE CHANNEL --- SEND COMMAND TO TWITCH TO DO THE THING
+				var twitch = new TwitchClient();
+				twitch.Initialize(new ConnectionCredentials(TwitchAuthTokens.Instance.UserName, TwitchAuthTokens.Instance.AccessToken));
+				twitch.Connect();
+				twitch.JoinChannel(TwitchAuthTokens.Instance.UserName);
+				twitch.Host(TwitchAuthTokens.Instance.UserName, nextChannel.UserName);
+				if (channelWeAreCurrentlyHosting != null) await repo.Remove(channelWeAreCurrentlyHosting);
+				await repo.AddOrUpdate(new CurrentHostConfiguration() {
+					HostedChannelId = nextChannel.ChannelId,
+					HostedChannelName = nextChannel.UserName,
+					ManagedChannelId = _MyChannelId
+				});
+			} 
 
 		}
 

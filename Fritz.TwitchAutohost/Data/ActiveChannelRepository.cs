@@ -1,6 +1,8 @@
 ﻿using Microsoft.Azure.Cosmos.Table;
 using Microsoft.Extensions.Configuration;
+using Newtonsoft.Json.Linq;
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Fritz.TwitchAutohost.Data
@@ -20,6 +22,38 @@ namespace Fritz.TwitchAutohost.Data
 
 			var obj = await base.Get("A", channelId);
 			await base.Remove(obj);
+
+		}
+
+		public async Task<IEnumerable<ActiveChannel>> GetAllActiveChannels() {
+
+
+			var testList = new List<ActiveChannel> { 
+				new ActiveChannel {
+					UserName="csharpfritz",
+					ChannelId = "96909659",
+					Category = "Science & Technology",
+					Mature = false,
+					Tags = new string[] { "Programming", "AMA", "Web Programming" }
+				},
+				new ActiveChannel {
+					UserName="drlupo",
+					ChannelId="29829912",
+					Category="Fortnite",
+					Mature=false,
+					Tags = new string[] { }
+				},
+				new ActiveChannel {
+					UserName = "fiercekittenz",
+					ChannelId = "63208102",
+					Category = "Science & Technology",
+					Mature = true,
+					Tags = new string[]  { "Programming", "AMA" }
+				}
+			};
+			return testList;
+
+			//return await GetAllForPartition("A");
 
 		}
 

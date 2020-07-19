@@ -8,9 +8,9 @@ using System.Threading.Tasks;
 namespace Fritz.TwitchAutohost.Data
 {
 
-	public abstract class BaseTableRepository<T> where T : TableEntity
+	public abstract class BaseTableRepository<T> where T : TableEntity, new()
 	{
-		
+
 		protected IConfiguration _Configuration { get; }
 
 		protected BaseTableRepository(IConfiguration configuration)
@@ -23,7 +23,7 @@ namespace Fritz.TwitchAutohost.Data
 		protected CloudTable GetCloudTable(string tableName)
 		{
 
-			var account = CloudStorageAccount.Parse(_Configuration["TwitchChatStorage"]);
+			var account = CloudStorageAccount.Parse(_Configuration["TwitchAutohostStorage"]);
 			var client = account.CreateCloudTableClient(new TableClientConfiguration());
 			return client.GetTableReference(tableName);
 
@@ -45,8 +45,42 @@ namespace Fritz.TwitchAutohost.Data
 			var getOperation = TableOperation.Retrieve<T>(partitionKey, rowKey);
 
 			return (await table.ExecuteAsync(getOperation)).Result as T;
-			
+
 		}
+
+		public async Task<IEnumerable<T>> GetAllForPartition(string partitionKey) {
+
+			var table = GetCloudTable(TableName);
+
+			var query = new TableQuery<T>
+			{
+				FilterString = TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKey)
+			};
+
+			TableContinuationToken token = null;
+			var outList = new List<T>();
+			while (true)
+			{
+				var results = await table.ExecuteQuerySegmentedAsync<T>(query.Take(10), token);
+				if (results.Results.Count == 0) break;
+
+				outList.AddRange(results.Results);
+
+				if (results.ContinuationToken != null)
+				{
+					token = results.ContinuationToken;
+				}
+				else
+				{
+					break;
+				}
+
+			}
+
+			return outList;
+
+		}
+
 
 		public Task Remove(T sub)
 		{
@@ -56,8 +90,6 @@ namespace Fritz.TwitchAutohost.Data
 			return table.ExecuteAsync(TableOperation.Delete(sub));
 
 		}
-
-
 
 
 	}
