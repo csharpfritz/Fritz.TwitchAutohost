@@ -2,12 +2,15 @@
 using Microsoft.Extensions.ObjectPool;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Text;
 
 namespace Fritz.TwitchAutohost.Data
 {
 	public class ActiveChannel : TableEntity
 	{
+
+		public const string OFFLINE = "<offline>";
 
 		public ActiveChannel()
 		{
@@ -44,4 +47,14 @@ namespace Fritz.TwitchAutohost.Data
 		}
 
 	}
+
+	public class OfflineChannel : ActiveChannel {
+
+		public OfflineChannel()
+		{
+			Category = OFFLINE;
+		}
+
+	}
+
 }

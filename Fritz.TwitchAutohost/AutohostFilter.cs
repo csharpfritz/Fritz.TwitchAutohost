@@ -23,20 +23,31 @@ namespace Fritz.TwitchAutohost
 		/// </summary>
 		/// <param name="activeChannels"></param>
 		/// <returns></returns>
-		public ActiveChannel DecideOnChannelToHost(IEnumerable<ActiveChannel> activeChannels) {
+		public ActiveChannel DecideOnChannelToHost(IEnumerable<ActiveChannel> activeChannels, IEnumerable<string> channelsToAvoid = null) {
 
 			if (string.IsNullOrEmpty(_Configuration["HostChannels"])) return null;
 
+			channelsToAvoid = channelsToAvoid ?? new string[] { };
+
 			/// Start with:  Science & Technology category, Mature=false			
-			return activeChannels.Where(a => a.Category == "Science & Technology")
-				.Where(a => !a.Mature)
+			return activeChannels.Where(ChannelCriteria)
+				.Where(a => !channelsToAvoid.Contains(a.UserName))
 				.OrderBy(a => Guid.NewGuid())
 				.FirstOrDefault();
 
 
 		}
 
-	
+		public Func<ActiveChannel, bool> ChannelCriteria => 
+			new Func<ActiveChannel, bool>
+				(a => a.Category == "Science & Technology" && !a.Mature);
+
+
+		internal bool IsValid(ActiveChannel channelInformation)
+		{
+			return ChannelCriteria(channelInformation);
+		}
+
 	}
 
 

@@ -63,9 +63,21 @@ namespace Fritz.TwitchAutohost
 			if (channelId == _MyChannelId || (channelWeAreCurrentlyHosting != null && channelId == channelWeAreCurrentlyHosting.HostedChannelId))
 			{
 				var channels = await new ActiveChannelRepository(Configuration).GetAllActiveChannels();
-				var nextChannel = new AutohostFilter(Configuration).DecideOnChannelToHost(channels);
-				if (nextChannel == null) return;
+				var autohostFilter = new AutohostFilter(Configuration);
 
+				// TODO: Get information about this Twitch channel and re-inspect JUST this channel
+				var valid = false;
+				var channelsToAvoid = new List<string>();
+				ActiveChannel nextChannel = null;
+				while (!valid)
+				{
+					nextChannel = autohostFilter.DecideOnChannelToHost(channels, channelsToAvoid);
+					var channelInformation = await GetInformationForChannel(nextChannel.UserName);
+					valid = channelInformation.Category == ActiveChannel.OFFLINE ? false : autohostFilter.IsValid(channelInformation);
+					if (!valid) channelsToAvoid.Add(nextChannel.UserName);
+				}
+
+				if (nextChannel == null) return;
 				// HOST THE CHANNEL --- SEND COMMAND TO TWITCH TO DO THE THING
 				var twitch = new TwitchClient();
 				twitch.Initialize(new ConnectionCredentials(TwitchAuthTokens.Instance.UserName, TwitchAuthTokens.Instance.AccessToken));
@@ -80,6 +92,24 @@ namespace Fritz.TwitchAutohost
 					ManagedChannelId = _MyChannelId
 				});
 			}
+
+		}
+
+		private async Task<ActiveChannel> GetInformationForChannel(string userName)
+		{
+
+			var client = GetHttpClient("https://api.twitch.tv/helix/streams", authHeader: true);
+			var response = await client.GetAsync($"?user_login={userName}");
+			try
+			{
+				response.EnsureSuccessStatusCode();
+			} catch {
+				return new OfflineChannel();
+			}
+
+			var content = await response.Content.ReadAsStringAsync();
+			var payload = JsonConvert.DeserializeObject<TwitchStreamChangeMessage>(content);
+			return await ConvertFromPayload(payload);
 
 		}
 
