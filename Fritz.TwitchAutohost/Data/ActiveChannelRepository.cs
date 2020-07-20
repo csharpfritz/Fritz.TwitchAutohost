@@ -21,6 +21,7 @@ namespace Fritz.TwitchAutohost.Data
 		{
 
 			var obj = await base.Get("A", channelId);
+			if (obj == null) return; // Exit because we have no record of this channel
 			await base.Remove(obj);
 
 		}

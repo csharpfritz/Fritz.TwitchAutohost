@@ -11,7 +11,7 @@ namespace Fritz.TwitchAutohost
 
 		private TwitchAuthTokens() {
 
-			UserName = "thefritzbot"; // Environment.GetEnvironmentVariable("TwitchUserName");
+			UserName = Environment.GetEnvironmentVariable("TwitchUserName");
 			OAuthToken = Environment.GetEnvironmentVariable("OAuthToken");
 			AccessToken = Environment.GetEnvironmentVariable("AccessToken");
 			RefreshToken = Environment.GetEnvironmentVariable("RefreshToken");

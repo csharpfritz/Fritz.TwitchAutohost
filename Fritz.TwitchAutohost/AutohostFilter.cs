@@ -25,6 +25,8 @@ namespace Fritz.TwitchAutohost
 		/// <returns></returns>
 		public ActiveChannel DecideOnChannelToHost(IEnumerable<ActiveChannel> activeChannels) {
 
+			if (string.IsNullOrEmpty(_Configuration["HostChannels"])) return null;
+
 			/// Start with:  Science & Technology category, Mature=false			
 			return activeChannels.Where(a => a.Category == "Science & Technology")
 				.Where(a => !a.Mature)

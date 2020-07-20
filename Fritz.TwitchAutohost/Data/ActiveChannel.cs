@@ -30,5 +30,18 @@ namespace Fritz.TwitchAutohost.Data
 
 		public string[] Tags { get; set; }
 
+		public override IDictionary<string, EntityProperty> WriteEntity(OperationContext operationContext)
+		{
+			var results = base.WriteEntity(operationContext);
+			results.Add("tags", EntityProperty.GeneratePropertyForString(string.Join('|', Tags)));
+			return results;
+		}
+
+		public override void ReadEntity(IDictionary<string, EntityProperty> properties, OperationContext operationContext)
+		{
+			base.ReadEntity(properties, operationContext);
+			Tags = properties["tags"].StringValue.Split('|');
+		}
+
 	}
 }

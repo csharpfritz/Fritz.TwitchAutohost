@@ -2,6 +2,7 @@
 using Fritz.TwitchAutohost.Messages;
 using Fritz.TwitchAutohost.Messages.Kraken;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Azure.Storage.Queue;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.Extensions.Configuration;
@@ -122,11 +123,29 @@ namespace Fritz.TwitchAutohost
 
 		}
 
+		[FunctionName("ScheduledResubscribe")]
+		public async Task ScheduledResubscribe([TimerTrigger("0 2 */2 * * *", RunOnStartup = true)] TimerInfo timer,
+			[Queue("twitch-webhook-subscription", Connection = STORAGE_CONNECTIONSTRING_NAME)] CloudQueue queue,
+			ILogger logger)
+		{
+
+			var repo = new CurrentSubscriptionsRepository(Configuration);
+
+			var currentSubscriptions = await repo.GetExpiringSubscriptions();
+			foreach (var item in currentSubscriptions)
+			{
+				await queue.AddMessageAsync(new CloudQueueMessage(item.ChannelName));
+				await repo.Remove(item);
+			}
+
+		}
 
 		[FunctionName("Test")]
 		public async Task<HttpResponseMessage> Test([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req) {
 
-			await HostTheNextStream(_MyChannelId);
+			var msg = JsonConvert.DeserializeObject<TwitchStreamChangeMessage>(@"{""data"":[{""game_id"":"""",""id"":""2250511473"",""language"":""en"",""started_at"":""2020-07-19T20:28:41Z"",""tag_ids"":[""6ea6bca4-4712-4ab9-a906-e3336a9d8039""],""thumbnail_url"":""https://static-cdn.jtvnw.net/previews-ttv/live_user_thefritzbot-{width}x{height}.jpg"",""title"":""This is a test - part 5"",""type"":""live"",""user_id"":""210391141"",""user_name"":""thefritzbot"",""viewer_count"":1}]}");
+			var result = await ConvertFromPayload(msg);
+
 
 			return new HttpResponseMessage(HttpStatusCode.OK) {
 				Content = new StringContent("Now hosting...")
@@ -137,8 +156,14 @@ namespace Fritz.TwitchAutohost
 		private async Task HandlePayload(HttpRequest req, ILogger log, string channelId)
 		{
 
-			var msg = await (new StreamReader(req.Body).ReadToEndAsync());
-			var payload = JsonConvert.DeserializeObject<TwitchStreamChangeMessage>(msg);
+			req.Body.Position = 0;
+			TwitchStreamChangeMessage payload = null;
+			using (var reader = new StreamReader(req.Body))
+			{
+				var msg = await reader.ReadToEndAsync();
+				log.LogInformation($"Payload received on stream change: {msg}");
+				payload = JsonConvert.DeserializeObject<TwitchStreamChangeMessage>(msg);
+			}
 			var repo = new ActiveChannelRepository(Configuration);
 
 			if (payload.data.Length == 0) // end of stream
@@ -157,7 +182,8 @@ namespace Fritz.TwitchAutohost
 			var repo = new CurrentHostConfigurationRepository(Configuration);
 			var channelWeAreCurrentlyHosting = (await repo.GetAllForPartition(_MyChannelId)).FirstOrDefault();
 
-			if (channelId == _MyChannelId || channelId == channelWeAreCurrentlyHosting.HostedChannelId) {
+			if (channelId == _MyChannelId || (channelWeAreCurrentlyHosting != null && channelId == channelWeAreCurrentlyHosting.HostedChannelId))
+			{
 				var channels = await new ActiveChannelRepository(Configuration).GetAllActiveChannels();
 				var nextChannel = new AutohostFilter(Configuration).DecideOnChannelToHost(channels);
 				if (nextChannel == null) return;
@@ -191,7 +217,7 @@ namespace Fritz.TwitchAutohost
 			};
 			ac.Mature = await GetMatureFlag(twitchStream.user_id);
 
-			return new ActiveChannel();
+			return ac;
 		}
 
 		private async Task<string> ConvertFromTwitchCategoryId(string categoryId)
@@ -201,7 +227,7 @@ namespace Fritz.TwitchAutohost
 			var result = await client.GetStringAsync($"?id={categoryId}");
 
 			var categoryPayload = JsonConvert.DeserializeObject<TwitchSearchCategoryPayload>(result);
-			return categoryPayload.data[0].name;
+			return categoryPayload.data.Any() ? categoryPayload.data[0].name : "";
 
 		}
 
@@ -242,5 +268,6 @@ namespace Fritz.TwitchAutohost
 			};
 
 		}
+
 	}
 }

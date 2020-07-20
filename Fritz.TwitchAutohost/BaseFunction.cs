@@ -53,14 +53,14 @@ namespace Fritz.TwitchAutohost
     protected async Task<bool> VerifyPayloadSecret(HttpRequest req, ILogger log)
     {
 
-      var signature = req.Headers["X-Hub-Signature"].ToString();
+      var signature = req.Headers["X-Hub-Signature"].ToString().Replace("sha256=","");
 
       log.LogInformation($"Twitch Signature sent: {signature}");
 
       var ourHashCalculation = string.Empty;
       if (req.Body.CanSeek)
       {
-        using (var reader = new StreamReader(req.Body, Encoding.UTF8))
+        using (var reader = new StreamReader(req.Body, Encoding.UTF8, true, bufferSize: 1024, leaveOpen: true))
         {
           req.Body.Position = 0;
           var bodyContent = await reader.ReadToEndAsync();
@@ -69,7 +69,7 @@ namespace Fritz.TwitchAutohost
       }
 
       log.LogInformation($"Our calculated signature: {ourHashCalculation}");
-      return true;
+      return ourHashCalculation.Equals(signature, StringComparison.InvariantCultureIgnoreCase);
 
     }
 
@@ -82,7 +82,7 @@ namespace Fritz.TwitchAutohost
       var hmac = new HMACSHA256(keybytes);
       var hmacBytes = hmac.ComputeHash(dataBytes);
 
-      return Convert.ToBase64String(hmacBytes);
+      return BitConverter.ToString(hmacBytes).Replace("-", "");
 
     }
 
