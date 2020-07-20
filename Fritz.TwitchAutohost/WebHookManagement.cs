@@ -28,13 +28,12 @@ namespace Fritz.TwitchAutohost
 
 		private const string STORAGE_CONNECTIONSTRING_NAME = "TwitchAutohostStorage";
 		private readonly CurrentSubscriptionsRepository _Repository;
-		private readonly string _MyChannelId;
+		private readonly TwitchStreamManager _StreamManager;
 
-		public WebHookManagement(IConfiguration configuration, IHttpClientFactory httpClientFactory, CurrentSubscriptionsRepository repository) : base(configuration, httpClientFactory)
+		public WebHookManagement(IConfiguration configuration, IHttpClientFactory httpClientFactory, CurrentSubscriptionsRepository repository, TwitchStreamManager streamManager) : base(configuration, httpClientFactory)
 		{
 			_Repository = repository;
-			_MyChannelId = configuration["ChannelId"];
-
+			_StreamManager = streamManager;
 		}
 
 		[FunctionName("Subscribe")]
@@ -117,7 +116,7 @@ namespace Fritz.TwitchAutohost
 				log.LogTrace($"Valid signature for ChannelId {channelId}");
 			}
 
-			await HandlePayload(req, log, channelId);
+			await _StreamManager.HandlePayload(req, log, channelId);
 
 			return new HttpResponseMessage(HttpStatusCode.OK);
 
@@ -143,113 +142,18 @@ namespace Fritz.TwitchAutohost
 		[FunctionName("Test")]
 		public async Task<HttpResponseMessage> Test([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req) {
 
-			var msg = JsonConvert.DeserializeObject<TwitchStreamChangeMessage>(@"{""data"":[{""game_id"":"""",""id"":""2250511473"",""language"":""en"",""started_at"":""2020-07-19T20:28:41Z"",""tag_ids"":[""6ea6bca4-4712-4ab9-a906-e3336a9d8039""],""thumbnail_url"":""https://static-cdn.jtvnw.net/previews-ttv/live_user_thefritzbot-{width}x{height}.jpg"",""title"":""This is a test - part 5"",""type"":""live"",""user_id"":""210391141"",""user_name"":""thefritzbot"",""viewer_count"":1}]}");
-			var result = await ConvertFromPayload(msg);
+			var tagIds = new string[] { "6ea6bca4-4712-4ab9-a906-e3336a9d8039",
+								"6f86127d-6051-4a38-94bb-f7b475dde109",
+								"cea7bc0c-75a5-4446-8743-6db031b71550",
+								"c23ce252-cf78-4b98-8c11-8769801aaf3a",
+								"a59f1e4e-257b-4bd0-90c7-189c3efbf917",
+								"67259b26-ff83-444e-9d3c-faab390df16f" };
 
+			var tagNames = await _StreamManager.ConvertFromTwitchTagIds(tagIds);
 
 			return new HttpResponseMessage(HttpStatusCode.OK) {
-				Content = new StringContent("Now hosting...")
+				Content = new StringContent(string.Join(',', tagNames))
 			};
-
-		}
-
-		private async Task HandlePayload(HttpRequest req, ILogger log, string channelId)
-		{
-
-			req.Body.Position = 0;
-			TwitchStreamChangeMessage payload = null;
-			using (var reader = new StreamReader(req.Body))
-			{
-				var msg = await reader.ReadToEndAsync();
-				log.LogInformation($"Payload received on stream change: {msg}");
-				payload = JsonConvert.DeserializeObject<TwitchStreamChangeMessage>(msg);
-			}
-			var repo = new ActiveChannelRepository(Configuration);
-
-			if (payload.data.Length == 0) // end of stream
-			{
-				await repo.RemoveByChannelId(channelId);
-				await HostTheNextStream(channelId);
-			} else {
-				await repo.AddOrUpdate(await ConvertFromPayload(payload));
-			}
-
-		}
-
-		private async Task HostTheNextStream(string channelId)
-		{
-
-			var repo = new CurrentHostConfigurationRepository(Configuration);
-			var channelWeAreCurrentlyHosting = (await repo.GetAllForPartition(_MyChannelId)).FirstOrDefault();
-
-			if (channelId == _MyChannelId || (channelWeAreCurrentlyHosting != null && channelId == channelWeAreCurrentlyHosting.HostedChannelId))
-			{
-				var channels = await new ActiveChannelRepository(Configuration).GetAllActiveChannels();
-				var nextChannel = new AutohostFilter(Configuration).DecideOnChannelToHost(channels);
-				if (nextChannel == null) return;
-				
-				// HOST THE CHANNEL --- SEND COMMAND TO TWITCH TO DO THE THING
-				var twitch = new TwitchClient();
-				twitch.Initialize(new ConnectionCredentials(TwitchAuthTokens.Instance.UserName, TwitchAuthTokens.Instance.AccessToken));
-				twitch.Connect();
-				twitch.JoinChannel(TwitchAuthTokens.Instance.UserName);
-				twitch.Host(TwitchAuthTokens.Instance.UserName, nextChannel.UserName);
-				if (channelWeAreCurrentlyHosting != null) await repo.Remove(channelWeAreCurrentlyHosting);
-				await repo.AddOrUpdate(new CurrentHostConfiguration() {
-					HostedChannelId = nextChannel.ChannelId,
-					HostedChannelName = nextChannel.UserName,
-					ManagedChannelId = _MyChannelId
-				});
-			} 
-
-		}
-
-		private async Task<ActiveChannel> ConvertFromPayload(TwitchStreamChangeMessage payload)
-		{
-
-			var twitchStream = payload.data[0];
-			var ac = new ActiveChannel
-			{
-				Category = await ConvertFromTwitchCategoryId(twitchStream.game_id), // TODO: Lookup and convert from Twitch's lookup table
-				ChannelId = twitchStream.user_id,
-				Tags = await ConvertFromTwitchTagIds(twitchStream.tag_ids),
-				UserName = twitchStream.user_name
-			};
-			ac.Mature = await GetMatureFlag(twitchStream.user_id);
-
-			return ac;
-		}
-
-		private async Task<string> ConvertFromTwitchCategoryId(string categoryId)
-		{
-
-			var client = GetHttpClient("https://api.twitch.tv/helix/games", authHeader: true);
-			var result = await client.GetStringAsync($"?id={categoryId}");
-
-			var categoryPayload = JsonConvert.DeserializeObject<TwitchSearchCategoryPayload>(result);
-			return categoryPayload.data.Any() ? categoryPayload.data[0].name : "";
-
-		}
-
-		private async Task<bool> GetMatureFlag(string user_id)
-		{
-			// FETCH mature flag from https://api.twitch.tv/kraken/streams/<channel ID>
-			var client = GetHttpClient("https://api.twitch.tv/kraken/streams/", authHeader: true);
-			var result = await client.GetStringAsync(user_id);
-
-			return JsonConvert.DeserializeObject<TwitchGetStream>(result).stream.channel.mature;
-		}
-
-		private async Task<string[]> ConvertFromTwitchTagIds(string[] tag_ids)
-		{
-
-			// TODO: Convert with a query using this syntax:  https://dev.twitch.tv/docs/api/reference#get-all-stream-tags
-			var client = GetHttpClient("https://api.twitch.tv/helix/tags/streams", authHeader: true);
-			var result = await client.GetStringAsync($"?tag_id={string.Join('&', tag_ids)}");
-
-			var tagPayload = JsonConvert.DeserializeObject<TwitchGetTagsPayload>(result);
-
-			return tagPayload.data.Select(d => d.localization_names.EN_US).ToArray();
 
 		}
 

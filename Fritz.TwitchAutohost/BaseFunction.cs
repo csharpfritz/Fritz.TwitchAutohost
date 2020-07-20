@@ -113,5 +113,6 @@ namespace Fritz.TwitchAutohost
 			return obj["data"][0]["id"].ToString();
 
 		}
+
   }
 }

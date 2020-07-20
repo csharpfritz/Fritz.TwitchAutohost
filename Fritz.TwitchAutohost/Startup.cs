@@ -19,6 +19,7 @@ namespace Fritz.TwitchAutohost
 
 			builder.Services.AddHttpClient();
 			builder.Services.AddTransient<CurrentSubscriptionsRepository>();
+			builder.Services.AddTransient<TwitchStreamManager>();
 
 		}
 	}
