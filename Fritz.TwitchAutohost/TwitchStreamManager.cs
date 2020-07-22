@@ -4,6 +4,7 @@ using Fritz.TwitchAutohost.Messages.Kraken;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.ObjectPool;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -152,7 +153,8 @@ namespace Fritz.TwitchAutohost
 		public async Task<string[]> ConvertFromTwitchTagIds(string[] tag_ids)
 		{
 
-			// TODO: Convert with a query using this syntax:  https://dev.twitch.tv/docs/api/reference#get-all-stream-tags
+			if (tag_ids == null) return new string[] { };
+
 			var client = GetHttpClient("https://api.twitch.tv/helix/tags/streams", authHeader: true);
 			var result = await client.GetStringAsync($"?tag_id={string.Join("&tag_id=", tag_ids)}");
 
