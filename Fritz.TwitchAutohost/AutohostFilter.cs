@@ -25,7 +25,7 @@ namespace Fritz.TwitchAutohost
 		/// <returns></returns>
 		public ActiveChannel DecideOnChannelToHost(IEnumerable<ActiveChannel> activeChannels, IEnumerable<string> channelsToAvoid = null) {
 
-			if (string.IsNullOrEmpty(_Configuration["HostChannels"])) return null;
+			if (!TwitchStreamManager.ChannelHostingActivated) return null;
 
 			channelsToAvoid = channelsToAvoid ?? new string[] { };
 

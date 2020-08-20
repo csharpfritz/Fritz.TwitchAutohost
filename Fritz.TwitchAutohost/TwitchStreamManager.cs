@@ -28,7 +28,11 @@ namespace Fritz.TwitchAutohost
 		public TwitchStreamManager(IConfiguration configuration, IHttpClientFactory httpClientFactory) : base(configuration, httpClientFactory)
 		{
 			_MyChannelId = configuration["ChannelId"];
+			ChannelHostingActivated = (!string.IsNullOrEmpty(configuration["HostChannelsActive"]) && bool.Parse(configuration["HostChannelsActive"]));
+
 		}
+
+		internal static bool ChannelHostingActivated = false;
 
 		public async Task HandlePayload(HttpRequest req, ILogger log, string channelId)
 		{
@@ -55,13 +59,15 @@ namespace Fritz.TwitchAutohost
 
 		}
 
-		private async Task HostTheNextStream(string channelId)
+		internal async Task HostTheNextStream(string channelIdThatJustEnded)
 		{
+
+			if (!ChannelHostingActivated) return;
 
 			var repo = new CurrentHostConfigurationRepository(Configuration);
 			var channelWeAreCurrentlyHosting = (await repo.GetAllForPartition(_MyChannelId)).FirstOrDefault();
 
-			if (channelId == _MyChannelId || (channelWeAreCurrentlyHosting != null && channelId == channelWeAreCurrentlyHosting.HostedChannelId))
+			if (channelIdThatJustEnded == _MyChannelId || (channelWeAreCurrentlyHosting != null && channelIdThatJustEnded == channelWeAreCurrentlyHosting.HostedChannelId))
 			{
 				var channels = await new ActiveChannelRepository(Configuration).GetAllActiveChannels();
 				var autohostFilter = new AutohostFilter(Configuration);
@@ -78,7 +84,7 @@ namespace Fritz.TwitchAutohost
 					if (!valid) channelsToAvoid.Add(nextChannel.UserName);
 				}
 
-				if (nextChannel == null) return;
+				if (nextChannel == null || nextChannel.Category == ActiveChannel.OFFLINE) return;
 				// HOST THE CHANNEL --- SEND COMMAND TO TWITCH TO DO THE THING
 				var twitch = new TwitchClient();
 				twitch.Initialize(new ConnectionCredentials(TwitchAuthTokens.Instance.UserName, TwitchAuthTokens.Instance.AccessToken));
@@ -96,7 +102,22 @@ namespace Fritz.TwitchAutohost
 
 		}
 
-		private async Task<ActiveChannel> GetInformationForChannel(string userName)
+		/// <summary>
+		/// Inspect the channel of the Twitch user submitted and immediately log their Active channel status
+		/// </summary>
+		/// <param name="userName"></param>
+		/// <returns></returns>
+		internal async Task InspectChannelAndLogStatus(string userName) {
+
+			var status = await GetInformationForChannel(userName);
+			if (status.Category == ActiveChannel.OFFLINE) return;
+
+			var repo = new ActiveChannelRepository(Configuration);
+			await repo.AddOrUpdate(status);
+
+		}
+
+		internal async Task<ActiveChannel> GetInformationForChannel(string userName)
 		{
 
 			var client = GetHttpClient("https://api.twitch.tv/helix/streams", authHeader: true);
@@ -110,6 +131,8 @@ namespace Fritz.TwitchAutohost
 
 			var content = await response.Content.ReadAsStringAsync();
 			var payload = JsonConvert.DeserializeObject<TwitchStreamChangeMessage>(content);
+
+			if (payload.data.Length == 0) return new OfflineChannel();
 			return await ConvertFromPayload(payload);
 
 		}

@@ -28,11 +28,21 @@ namespace Fritz.TwitchAutohost.Data
 
 		public async Task<IEnumerable<ActiveChannel>> GetAllActiveChannels() {
 
+			if (!TwitchStreamManager.ChannelHostingActivated)
+			{
 
-			var testList = new List<ActiveChannel> { 
+				// Debug list of channels
+				var testList = new List<ActiveChannel> {
+				//new ActiveChannel {
+				//	UserName="csharpfritz",
+				//	ChannelId = "96909659",
+				//	Category = "Science & Technology",
+				//	Mature = false,
+				//	Tags = new string[] { "Programming", "AMA", "Web Programming" }
+				//},
 				new ActiveChannel {
-					UserName="csharpfritz",
-					ChannelId = "96909659",
+					UserName="baldbeardedbuilder",
+					ChannelId = "279965339",
 					Category = "Science & Technology",
 					Mature = false,
 					Tags = new string[] { "Programming", "AMA", "Web Programming" }
@@ -52,9 +62,15 @@ namespace Fritz.TwitchAutohost.Data
 					Tags = new string[]  { "Programming", "AMA" }
 				}
 			};
-			return testList;
+				return testList;
 
-			//return await GetAllForPartition("A");
+			}
+			else
+			{
+
+				return await GetAllForPartition("A");
+
+			}
 
 		}
 

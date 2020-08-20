@@ -2,6 +2,7 @@
 using Fritz.TwitchAutohost.Messages;
 using Fritz.TwitchAutohost.Messages.Kraken;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Storage.Queue;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
@@ -36,20 +37,20 @@ namespace Fritz.TwitchAutohost
 			_StreamManager = streamManager;
 		}
 
-		[FunctionName("Subscribe")]
-		public async Task Subscribe([QueueTrigger("twitch-webhook-subscription", Connection = STORAGE_CONNECTIONSTRING_NAME)] string msg,
+		[FunctionName(nameof(Subscribe))]
+		public async Task Subscribe([QueueTrigger("twitch-webhook-subscription", Connection = STORAGE_CONNECTIONSTRING_NAME)] string twitchUserName,
 																				ILogger logger)
 		{
 
 			var twitchEndPoint = "https://api.twitch.tv/helix/webhooks/hub";
 			var leaseInSeconds = 864000; // = 10 days
 
-			var channelId = long.TryParse(msg, out var _) ? msg : await GetChannelIdForUserName(msg);
+			var channelId = long.TryParse(twitchUserName, out var _) ? twitchUserName : await GetChannelIdForUserName(twitchUserName);
 			var callbackUrl = new Uri(Configuration["EndpointBaseUrl"]);
 
 			var payload = new TwitchWebhookSubscriptionPayload
 			{
-				callback = new Uri(callbackUrl, $"?channelId={channelId}&username={msg}").ToString(),
+				callback = new Uri(callbackUrl, $"?channelId={channelId}&username={twitchUserName}").ToString(),
 				mode = "subscribe",
 				topic = $"https://api.twitch.tv/helix/streams?user_id={channelId}",
 				lease_seconds = leaseInSeconds,
@@ -71,10 +72,11 @@ namespace Fritz.TwitchAutohost
 					var newSub = new CurrentSubscription
 					{
 						ChannelId = channelId,
-						ChannelName = msg,
+						ChannelName = twitchUserName,
 						ExpirationDateTimeUtc = DateTime.UtcNow.AddSeconds(leaseInSeconds).AddDays(-1)
 					};
 					await _Repository.AddOrUpdate(newSub);
+					await _StreamManager.InspectChannelAndLogStatus(twitchUserName);
 
 				}
 
@@ -86,7 +88,7 @@ namespace Fritz.TwitchAutohost
 
 		}
 
-		[FunctionName("ReceiveStreamUpdate")]
+		[FunctionName(nameof(ReceiveStreamUpdate))]
 		public async Task<HttpResponseMessage> ReceiveStreamUpdate(
 			[HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req,
 							ILogger log)
@@ -122,8 +124,8 @@ namespace Fritz.TwitchAutohost
 
 		}
 
-		[FunctionName("ScheduledResubscribe")]
-		public async Task ScheduledResubscribe([TimerTrigger("0 2 */2 * * *", RunOnStartup = true)] TimerInfo timer,
+		[FunctionName(nameof(ScheduledResubscribe))]
+		public async Task ScheduledResubscribe([TimerTrigger(CrontabConfigs.EVERY_SECOND_HOUR_AND_SECOND_MINUTE, RunOnStartup = true)] TimerInfo timer,
 			[Queue("twitch-webhook-subscription", Connection = STORAGE_CONNECTIONSTRING_NAME)] CloudQueue queue,
 			ILogger logger)
 		{
@@ -139,21 +141,53 @@ namespace Fritz.TwitchAutohost
 
 		}
 
+		[FunctionName(nameof(TagRefresh))]
+		public async Task TagRefresh([TimerTrigger(CrontabConfigs.EVERY_THIRTY_MINUTES, RunOnStartup =true) ] TimerInfo timerInfo,
+			ILogger logger)
+		{
+
+			var repo = new ActiveChannelRepository(Configuration);
+			var currentChannels = await repo.GetAllActiveChannels();
+			var taskList = new List<Task<ActiveChannel>>();
+
+			foreach (var channel in currentChannels)
+			{
+				taskList.Add(_StreamManager.GetInformationForChannel(channel.UserName));
+			}
+
+			Task.WaitAll(taskList.ToArray(), (int)TimeSpan.FromMinutes(5).TotalMilliseconds);
+
+			foreach (var channelUpdate in taskList)
+			{
+
+				var newInfo = channelUpdate.Result;
+				if (newInfo.Category == ActiveChannel.OFFLINE) continue;
+
+				await repo.AddOrUpdate(newInfo);
+
+			}
+
+		}
+
+
 		[FunctionName("Test")]
 		public async Task<HttpResponseMessage> Test([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req) {
 
-			var tagIds = new string[] { "6ea6bca4-4712-4ab9-a906-e3336a9d8039",
-								"6f86127d-6051-4a38-94bb-f7b475dde109",
-								"cea7bc0c-75a5-4446-8743-6db031b71550",
-								"c23ce252-cf78-4b98-8c11-8769801aaf3a",
-								"a59f1e4e-257b-4bd0-90c7-189c3efbf917",
-								"67259b26-ff83-444e-9d3c-faab390df16f" };
+			await _StreamManager.HostTheNextStream("123391659");
+			return new HttpResponseMessage(HttpStatusCode.OK);
 
-			var tagNames = await _StreamManager.ConvertFromTwitchTagIds(tagIds);
+			//var tagIds = new string[] { "6ea6bca4-4712-4ab9-a906-e3336a9d8039",
+			//					"6f86127d-6051-4a38-94bb-f7b475dde109",
+			//					"cea7bc0c-75a5-4446-8743-6db031b71550",
+			//					"c23ce252-cf78-4b98-8c11-8769801aaf3a",
+			//					"a59f1e4e-257b-4bd0-90c7-189c3efbf917",
+			//					"67259b26-ff83-444e-9d3c-faab390df16f" };
 
-			return new HttpResponseMessage(HttpStatusCode.OK) {
-				Content = new StringContent(string.Join(',', tagNames))
-			};
+			//var tagNames = await _StreamManager.ConvertFromTwitchTagIds(tagIds);
+
+			//return new HttpResponseMessage(HttpStatusCode.OK) {
+			//	Content = new StringContent(string.Join(',', tagNames))
+			//};
 
 		}
 
