@@ -11,9 +11,9 @@ namespace Fritz.TwitchAutohost
 	public class AutohostFilter
 	{
 
-		private readonly IConfiguration _Configuration;
+		private readonly ServiceConfiguration _Configuration;
 
-		public AutohostFilter(IConfiguration configuration)
+		public AutohostFilter(ServiceConfiguration configuration)
 		{
 			_Configuration = configuration;
 		}

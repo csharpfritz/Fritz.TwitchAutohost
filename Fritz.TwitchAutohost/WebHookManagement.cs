@@ -28,13 +28,13 @@ namespace Fritz.TwitchAutohost
 	{
 
 		private const string STORAGE_CONNECTIONSTRING_NAME = "TwitchAutohostStorage";
+		private readonly IHttpClientFactory _HttpClientFactory;
 		private readonly CurrentSubscriptionsRepository _Repository;
-		private readonly TwitchStreamManager _StreamManager;
 
-		public WebHookManagement(IConfiguration configuration, IHttpClientFactory httpClientFactory, CurrentSubscriptionsRepository repository, TwitchStreamManager streamManager) : base(configuration, httpClientFactory)
+		public WebHookManagement(ServiceConfiguration configuration, IHttpClientFactory httpClientFactory, CurrentSubscriptionsRepository repository) : base(configuration, httpClientFactory)
 		{
+			_HttpClientFactory = httpClientFactory;
 			_Repository = repository;
-			_StreamManager = streamManager;
 		}
 
 		[FunctionName(nameof(Subscribe))]
@@ -46,7 +46,7 @@ namespace Fritz.TwitchAutohost
 			var leaseInSeconds = 864000; // = 10 days
 
 			var channelId = long.TryParse(twitchUserName, out var _) ? twitchUserName : await GetChannelIdForUserName(twitchUserName);
-			var callbackUrl = new Uri(Configuration["EndpointBaseUrl"]);
+			var callbackUrl = Configuration.EndpointBaseUrl;
 
 			var payload = new TwitchWebhookSubscriptionPayload
 			{
@@ -76,7 +76,7 @@ namespace Fritz.TwitchAutohost
 						ExpirationDateTimeUtc = DateTime.UtcNow.AddSeconds(leaseInSeconds).AddDays(-1)
 					};
 					await _Repository.AddOrUpdate(newSub);
-					await _StreamManager.InspectChannelAndLogStatus(twitchUserName);
+					await new TwitchStreamManager(Configuration, logger, _HttpClientFactory).InspectChannelAndLogStatus(twitchUserName);
 
 				}
 
@@ -91,34 +91,34 @@ namespace Fritz.TwitchAutohost
 		[FunctionName(nameof(ReceiveStreamUpdate))]
 		public async Task<HttpResponseMessage> ReceiveStreamUpdate(
 			[HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req,
-							ILogger log)
+							ILogger logger)
 						//	,[ServiceBus("EndOfStream", Connection = "ServiceBusConnectionString", EntityType = EntityType.Topic)]
 						//out CompletedStream completedStream)
 		{
 
 			var channelId = req.Query["channelId"].ToString();
-			log.LogMetric("Query", 1, new Dictionary<string, object> { { "TwitchChannelId", channelId } });
-			log.LogInformation($"ChannelId: {channelId}");
+			logger.LogMetric("Query", 1, new Dictionary<string, object> { { "TwitchChannelId", channelId } });
+			logger.LogInformation($"ChannelId: {channelId}");
 
 			// Handle the verification on the WebHook subscription
-			var challengeContent = VerifySubscription(req, log);
+			var challengeContent = VerifySubscription(req, logger);
 			if (challengeContent != null) {
 				return challengeContent;
 			}
 
 			if (!string.IsNullOrEmpty(req.Query["userid"].ToString())) channelId = GetChannelIdForUserName(req.Query["userid"].ToString()).GetAwaiter().GetResult();
 
-			if (!(VerifyPayloadSecret(req, log).GetAwaiter().GetResult()))
+			if (!(VerifyPayloadSecret(req, logger).GetAwaiter().GetResult()))
 			{
-				log.LogError($"Invalid signature on request for ChannelId {channelId}");
+				logger.LogError($"Invalid signature on request for ChannelId {channelId}");
 				return null;
 			}
 			else
 			{
-				log.LogTrace($"Valid signature for ChannelId {channelId}");
+				logger.LogTrace($"Valid signature for ChannelId {channelId}");
 			}
 
-			await _StreamManager.HandlePayload(req, log, channelId);
+			await new TwitchStreamManager(Configuration, logger, _HttpClientFactory).HandleStreamUpdateWebHookPayload(req, logger, channelId);
 
 			return new HttpResponseMessage(HttpStatusCode.OK);
 
@@ -141,8 +141,8 @@ namespace Fritz.TwitchAutohost
 
 		}
 
-		[FunctionName(nameof(TagRefresh))]
-		public async Task TagRefresh([TimerTrigger(CrontabConfigs.EVERY_THIRTY_MINUTES, RunOnStartup =true) ] TimerInfo timerInfo,
+		[FunctionName(nameof(ActiveChannelMetaRefresh))]
+		public async Task ActiveChannelMetaRefresh([TimerTrigger(CrontabConfigs.EVERY_THIRTY_MINUTES, RunOnStartup =true) ] TimerInfo timerInfo,
 			ILogger logger)
 		{
 
@@ -150,9 +150,10 @@ namespace Fritz.TwitchAutohost
 			var currentChannels = await repo.GetAllActiveChannels();
 			var taskList = new List<Task<ActiveChannel>>();
 
+			var streamManager = new TwitchStreamManager(Configuration, logger, _HttpClientFactory);
 			foreach (var channel in currentChannels)
 			{
-				taskList.Add(_StreamManager.GetInformationForChannel(channel.UserName));
+				taskList.Add(streamManager.GetInformationForChannel(channel.UserName));
 			}
 
 			Task.WaitAll(taskList.ToArray(), (int)TimeSpan.FromMinutes(5).TotalMilliseconds);
@@ -173,7 +174,7 @@ namespace Fritz.TwitchAutohost
 		[FunctionName("Test")]
 		public async Task<HttpResponseMessage> Test([HttpTrigger(AuthorizationLevel.Anonymous, "get", "post", Route = null)] HttpRequest req) {
 
-			await _StreamManager.HostTheNextStream("123391659");
+			// await _StreamManager.HostTheNextStream("123391659");
 			return new HttpResponseMessage(HttpStatusCode.OK);
 
 			//var tagIds = new string[] { "6ea6bca4-4712-4ab9-a906-e3336a9d8039",

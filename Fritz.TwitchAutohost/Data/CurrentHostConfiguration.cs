@@ -8,16 +8,17 @@ namespace Fritz.TwitchAutohost.Data
 	public class CurrentHostConfiguration : TableEntity
 	{
 
-		public string ManagedChannelId {
-			get { return base.PartitionKey; }
-			set { base.PartitionKey = value; }
+		public CurrentHostConfiguration()
+		{
+			PartitionKey = "A";
 		}
 
-		public string HostedChannelId
-		{
+		public string ManagedChannelId {
 			get { return base.RowKey; }
 			set { base.RowKey = value; }
 		}
+
+		public string HostedChannelId { get; set; }
 
 		public string HostedChannelName { get; set; }
 

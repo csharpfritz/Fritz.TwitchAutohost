@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using Fritz.TwitchAutohost.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
@@ -19,13 +20,13 @@ namespace Fritz.TwitchAutohost
 
 		private readonly IHttpClientFactory _HttpClientFactory;
 
-		protected BaseFunction(IConfiguration configuration, IHttpClientFactory httpClientFactory)
+		protected BaseFunction(ServiceConfiguration configuration, IHttpClientFactory httpClientFactory)
 		{
 			Configuration = configuration;
 			_HttpClientFactory = httpClientFactory;
 		}
 
-		protected IConfiguration Configuration { get; }
+		protected ServiceConfiguration Configuration { get; }
 
 		protected HttpClient GetHttpClient(string baseAddress, string clientId = "", bool includeJson = true, bool authHeader = false)
 		{

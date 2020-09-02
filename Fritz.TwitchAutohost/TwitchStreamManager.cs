@@ -14,6 +14,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Threading.Tasks;
+using TwitchLib.Api;
 using TwitchLib.Client;
 using TwitchLib.Client.Extensions;
 using TwitchLib.Client.Models;
@@ -24,17 +25,20 @@ namespace Fritz.TwitchAutohost
 	{
 
 		private readonly string _MyChannelId;
+		private readonly ILogger _Logger;
 
-		public TwitchStreamManager(IConfiguration configuration, IHttpClientFactory httpClientFactory) : base(configuration, httpClientFactory)
+		public TwitchStreamManager(ServiceConfiguration configuration, ILogger logger, IHttpClientFactory httpClientFactory) : base(configuration, httpClientFactory)
 		{
-			_MyChannelId = configuration["ChannelId"];
-			ChannelHostingActivated = (!string.IsNullOrEmpty(configuration["HostChannelsActive"]) && bool.Parse(configuration["HostChannelsActive"]));
-
+			_MyChannelId = configuration.MyChannelId;
+			ChannelHostingActivated = configuration.HostChannelsActive;
+			DryRun = configuration.DryRun;
+			_Logger = logger;
 		}
 
 		internal static bool ChannelHostingActivated = false;
+		internal static bool DryRun = true;
 
-		public async Task HandlePayload(HttpRequest req, ILogger log, string channelId)
+		public async Task HandleStreamUpdateWebHookPayload(HttpRequest req, ILogger log, string channelId)
 		{
 
 			req.Body.Position = 0;
@@ -55,20 +59,69 @@ namespace Fritz.TwitchAutohost
 			else
 			{
 				await repo.AddOrUpdate(await ConvertFromPayload(payload));
+				var configRepo = new CurrentHostConfigurationRepository(Configuration);
+
+				if (channelId == _MyChannelId) {
+
+					// Force the channel category to Science and Technology
+					await SetChannelCategory();
+
+					// My channel started an original stream -> log we are currently broadcasting
+					_Logger.LogInformation($"We just started a stream on {Configuration.MyChannelName}");
+					await configRepo.AddOrUpdate(new CurrentHostConfiguration {
+						ManagedChannelId = _MyChannelId,
+						HostedChannelId = _MyChannelId,
+						HostedChannelName = ""
+					});
+
+				} else if (configRepo.GetForMyChannel() == null) {
+
+					// We are not currently hosting
+					_Logger.LogInformation($"We are not currently hosting - let's look for another channel to host");
+					await HostTheNextStream(channelId);
+
+				}
+
 			}
+
+		}
+
+		/// <summary>
+		/// Set the Channel category for our channel to Science & Technology
+		/// </summary>
+		/// <returns></returns>
+		private async Task SetChannelCategory()
+		{
+
+			var api = new TwitchAPI();
+			api.Settings.ClientId = Configuration.ClientId;
+			api.Settings.AccessToken = TwitchAuthTokens.Instance.AccessToken;
+
+			_Logger.LogInformation("Setting category to Science & Technology");
+			await api.V5.Channels.UpdateChannelAsync(Configuration.MyChannelId, game: "Science & Technology");
 
 		}
 
 		internal async Task HostTheNextStream(string channelIdThatJustEnded)
 		{
 
-			if (!ChannelHostingActivated) return;
+			if (!ChannelHostingActivated)
+			{
+				_Logger.LogInformation($"Channel hosting is not activated - will not look for a channel to host");
+				return;
+			}
 
 			var repo = new CurrentHostConfigurationRepository(Configuration);
-			var channelWeAreCurrentlyHosting = (await repo.GetAllForPartition(_MyChannelId)).FirstOrDefault();
+			var channelWeAreCurrentlyHosting = repo.GetByRowKey(_MyChannelId);
 
-			if (channelIdThatJustEnded == _MyChannelId || (channelWeAreCurrentlyHosting != null && channelIdThatJustEnded == channelWeAreCurrentlyHosting.HostedChannelId))
+			
+			if (channelIdThatJustEnded == _MyChannelId ||		// Our show just ended...
+				(channelWeAreCurrentlyHosting == null) ||			// We are not currently hosting anyone
+				(channelWeAreCurrentlyHosting != null && channelIdThatJustEnded == channelWeAreCurrentlyHosting.HostedChannelId))
 			{
+
+				_Logger.LogInformation($"Our stream OR a stream we were hosting ended... looking for another channel");
+
 				var channels = await new ActiveChannelRepository(Configuration).GetAllActiveChannels();
 				var autohostFilter = new AutohostFilter(Configuration);
 
@@ -79,19 +132,36 @@ namespace Fritz.TwitchAutohost
 				while (!valid)
 				{
 					nextChannel = autohostFilter.DecideOnChannelToHost(channels, channelsToAvoid);
+					if (nextChannel == null) break; // Exit now if no channel found
+
 					var channelInformation = await GetInformationForChannel(nextChannel.UserName);
 					valid = channelInformation.Category == ActiveChannel.OFFLINE ? false : autohostFilter.IsValid(channelInformation);
 					if (!valid) channelsToAvoid.Add(nextChannel.UserName);
 				}
 
-				if (nextChannel == null || nextChannel.Category == ActiveChannel.OFFLINE) return;
+				if (nextChannel == null || nextChannel.Category == ActiveChannel.OFFLINE)
+				{
+
+					_Logger.LogInformation($"Cannot identify another channel to host");
+
+					// Clear the current host config as we are not hosting again
+					await repo.Remove(repo.GetForMyChannel());
+					await LogHostAction(channelWeAreCurrentlyHosting, new ActiveChannel { 
+						Category = "",
+						Tags= new string[] { },
+						Title="- OFFLINE -",
+						UserName = "< OFFLINE >"
+					});
+					return;
+
+				}
 				// HOST THE CHANNEL --- SEND COMMAND TO TWITCH TO DO THE THING
-				var twitch = new TwitchClient();
-				twitch.Initialize(new ConnectionCredentials(TwitchAuthTokens.Instance.UserName, TwitchAuthTokens.Instance.AccessToken));
-				twitch.Connect();
-				twitch.JoinChannel(TwitchAuthTokens.Instance.UserName);
-				twitch.Host(TwitchAuthTokens.Instance.UserName, nextChannel.UserName);
-				if (channelWeAreCurrentlyHosting != null) await repo.Remove(channelWeAreCurrentlyHosting);
+
+				_Logger.LogInformation($"Starting host for: {nextChannel.UserName} with title '{nextChannel.Title}'");
+				if (!DryRun) await SendHostCommandToTwitch(repo, channelWeAreCurrentlyHosting, nextChannel);
+
+				await LogHostAction(channelWeAreCurrentlyHosting, nextChannel);
+
 				await repo.AddOrUpdate(new CurrentHostConfiguration()
 				{
 					HostedChannelId = nextChannel.ChannelId,
@@ -100,6 +170,32 @@ namespace Fritz.TwitchAutohost
 				});
 			}
 
+		}
+
+		private async Task SendHostCommandToTwitch(CurrentHostConfigurationRepository repo, CurrentHostConfiguration channelWeAreCurrentlyHosting, ActiveChannel nextChannel)
+		{
+			var twitch = new TwitchClient();
+			twitch.Initialize(new ConnectionCredentials(TwitchAuthTokens.Instance.UserName, TwitchAuthTokens.Instance.AccessToken));
+			twitch.Connect();
+			twitch.JoinChannel(TwitchAuthTokens.Instance.UserName);
+
+			_Logger.LogInformation($"Sending host command for channel {nextChannel.UserName}");
+
+			twitch.Host(TwitchAuthTokens.Instance.UserName, nextChannel.UserName);
+			if (channelWeAreCurrentlyHosting != null) await repo.Remove(channelWeAreCurrentlyHosting);
+		}
+
+		private async Task LogHostAction(CurrentHostConfiguration channelWeAreCurrentlyHosting, ActiveChannel nextChannel)
+		{
+			var logRepo = new HostLogRepository(Configuration);
+			await logRepo.AddOrUpdate(new HostLog
+			{
+				Category = nextChannel.Category,
+				FromChannelName = channelWeAreCurrentlyHosting?.HostedChannelName ?? "",
+				Tags = string.Join('|', nextChannel.Tags),
+				Title = nextChannel.Title,
+				ToChannelName = nextChannel.UserName
+			});
 		}
 
 		/// <summary>
@@ -146,6 +242,7 @@ namespace Fritz.TwitchAutohost
 				Category = await ConvertFromTwitchCategoryId(twitchStream.game_id), // TODO: Lookup and convert from Twitch's lookup table
 				ChannelId = twitchStream.user_id,
 				Tags = await ConvertFromTwitchTagIds(twitchStream.tag_ids),
+				Title = twitchStream.title,
 				UserName = twitchStream.user_name
 			};
 			ac.Mature = await GetMatureFlag(twitchStream.user_id);

@@ -10,7 +10,7 @@ namespace Fritz.TwitchAutohost.Data
 	public class ActiveChannelRepository : BaseTableRepository<ActiveChannel>
 	{
 
-		public ActiveChannelRepository(IConfiguration configuration) : base(configuration)
+		public ActiveChannelRepository(ServiceConfiguration configuration) : base(configuration)
 		{
 
 		}

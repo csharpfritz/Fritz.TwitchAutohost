@@ -33,6 +33,8 @@ namespace Fritz.TwitchAutohost.Data
 
 		public string[] Tags { get; set; }
 
+		public string Title { get; set; }
+
 		public override IDictionary<string, EntityProperty> WriteEntity(OperationContext operationContext)
 		{
 			var results = base.WriteEntity(operationContext);

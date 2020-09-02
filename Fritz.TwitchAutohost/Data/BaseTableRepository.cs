@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -11,27 +12,30 @@ namespace Fritz.TwitchAutohost.Data
 	public abstract class BaseTableRepository<T> where T : TableEntity, new()
 	{
 
-		protected IConfiguration _Configuration { get; }
+		protected ServiceConfiguration _Configuration { get; }
 
-		protected BaseTableRepository(IConfiguration configuration)
+		protected BaseTableRepository(ServiceConfiguration configuration)
 		{
 			_Configuration = configuration;
 		}
 
-		protected abstract string TableName { get; }
+		protected virtual string TableName { get { return typeof(T).Name; }  }
 
 		protected CloudTable GetCloudTable(string tableName)
 		{
 
-			var account = CloudStorageAccount.Parse(_Configuration["TwitchAutohostStorage"]);
+			var account = CloudStorageAccount.Parse(_Configuration.StorageConnectionString);
 			var client = account.CreateCloudTableClient(new TableClientConfiguration());
+			client.GetTableReference(tableName).CreateIfNotExists();
 			return client.GetTableReference(tableName);
 
 
 		}
 
-		public Task AddOrUpdate(T obj)
+		public virtual Task AddOrUpdate(T obj)
 		{
+
+			if (obj is ISetKeys keyObj) keyObj.SetKeys();
 
 			var table = GetCloudTable(TableName);
 
@@ -39,7 +43,8 @@ namespace Fritz.TwitchAutohost.Data
 
 		}
 
-		public async Task<T> Get(string partitionKey, string rowKey) {
+		public async Task<T> Get(string partitionKey, string rowKey)
+		{
 
 			var table = GetCloudTable(TableName);
 			var getOperation = TableOperation.Retrieve<T>(partitionKey, rowKey);
@@ -48,7 +53,20 @@ namespace Fritz.TwitchAutohost.Data
 
 		}
 
-		public async Task<IEnumerable<T>> GetAllForPartition(string partitionKey) {
+		public T GetByRowKey(string rowKey)
+		{
+
+			var table = GetCloudTable(TableName);
+			var query = new TableQuery<T>
+			{
+				FilterString = TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.Equal, rowKey)
+			};
+
+			return table.ExecuteQuery(query).FirstOrDefault();
+
+		}
+
+			public async Task<IEnumerable<T>> GetAllForPartition(string partitionKey) {
 
 			var table = GetCloudTable(TableName);
 

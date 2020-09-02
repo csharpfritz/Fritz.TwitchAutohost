@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -11,7 +12,7 @@ namespace Fritz.TwitchAutohost.Data
   {
 
 
-		public CurrentSubscriptionsRepository(IConfiguration configuration) : base(configuration)
+		public CurrentSubscriptionsRepository(ServiceConfiguration configuration) : base(configuration)
     {
 
     }
@@ -27,6 +28,20 @@ namespace Fritz.TwitchAutohost.Data
 
     }
 
+    public CurrentSubscription GetSubscriptionForChannel(string channelName) {
 
-  }
+			var table = GetCloudTable(TableName);
+
+			var query = new TableQuery<CurrentSubscription>
+			{
+				FilterString = TableQuery.GenerateFilterCondition("ChannelName", QueryComparisons.Equal, channelName)
+			};
+
+			var results = table.ExecuteQuery<CurrentSubscription>(query);
+			return results.FirstOrDefault();
+
+		}
+
+
+	}
 }
