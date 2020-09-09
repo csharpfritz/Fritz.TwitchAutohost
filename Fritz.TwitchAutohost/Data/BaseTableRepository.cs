@@ -103,6 +103,8 @@ namespace Fritz.TwitchAutohost.Data
 		public Task Remove(T sub)
 		{
 
+			if (sub == null) return Task.CompletedTask;
+
 			var table = GetCloudTable(TableName);
 
 			return table.ExecuteAsync(TableOperation.Delete(sub));
